@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 第一行：解决“防盗链”问题。隐藏来源地址，让视频服务器以为是直接播放 -->
+<meta name="referrer" content="never">
+
+<!-- 第二行：解决“HTTPS 拦截 HTTP”问题。自动把 http 视频链接转为 https 尝试加载 -->
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+    <link rel="manifest" href="manifest.json">
+    <title>私人影院 - 极客增强版</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dplayer/dist/DPlayer.min.js"></script>
+    <script src="data.js"></script>
+    <style>
+        :root { --primary: #007bff; --bg: #0a0a0a; --card: #161616; --accent: #ff9800; --watched: #444; }
+        body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: #fff; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        #player-box { width: 100%; background: #000; flex-shrink: 0; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,1); }
+        #dplayer { width: 100%; aspect-ratio: 16/9; }
+
+        .top-bar { padding: 12px 15px; background: #111; border-bottom: 1px solid #222; }
+        .stats-info { font-size: 12px; color: var(--accent); margin-bottom: 8px; display: flex; justify-content: space-between; }
+        
+        .search-box { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #222; color: #fff; box-sizing: border-box; outline: none; transition: 0.3s; }
+        .search-box:focus { border-color: var(--primary); box-shadow: 0 0 8px rgba(0,123,255,0.3); }
+
+        #content { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; scroll-behavior: smooth; }
+        
+        /* 影片卡片布局优化 */
+        .drama-card { background: var(--card); border-radius: 12px; margin-bottom: 25px; padding: 0; border: 1px solid #262626; overflow: hidden; display: flex; flex-direction: column; }
+        
+        /* 功能3：海报图片样式 */
+        .drama-poster { width: 100%; height: 160px; object-fit: cover; background: #222; border-bottom: 1px solid #222; }
+        .drama-info { padding: 15px; }
+        .drama-title { font-size: 1.1rem; color: var(--accent); margin-bottom: 12px; font-weight: bold; }
+        .drama-num { background: var(--accent); color: #000; padding: 2px 6px; border-radius: 4px; margin-right: 8px; font-size: 0.8rem; }
+        
+        .ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 8px; }
+        
+        /* 按钮样式优化 */
+        .ep-btn { 
+            padding: 8px 2px; background: #262626; border-radius: 6px; text-align: center; 
+            cursor: pointer; font-size: 12px; border: 1px solid #333;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: 0.2s;
+        }
+        .ep-btn:hover { border-color: var(--primary); }
+        .ep-btn.active { background: var(--primary); border-color: #55aaff; font-weight: bold; transform: scale(1.05); }
+        
+        /* 功能1：已观看/记忆样式 */
+        .ep-btn.watched { color: #888; border-style: dashed; }
+        .ep-btn.last-played { border-color: var(--accent); position: relative; }
+        .ep-btn.last-played::after { content: '上次看到这'; position: absolute; top: 0; right: 0; font-size: 8px; background: var(--accent); color: #000; padding: 0 2px; border-radius: 0 0 0 4px; }
+    </style>
+</head>
+<body>
+
+<div id="player-box"><div id="dplayer"><div class="player-placeholder">等待选择影片...</div></div></div>
+
+<div class="top-bar">
+    <div class="stats-info">
+        <span>片库：<b id="total-movies">0</b> 部</span>
+        <span id="history-tip" style="color: #666; cursor:pointer">清除播放记录</span>
+    </div>
+    <input type="text" class="search-box" id="search" placeholder="🔍 输入关键词搜索...">
+</div>
+
+<div class="notice-bar">
+    <marquee scrollamount="4">
+        📢 站点已托管至 Cloudflare 全球加速 | 资源请求请关注公众号：[你的名称] | 商务合作：[你的邮箱]
+    </marquee>
+</div>
+
+<div id="content"><div id="main-list"></div></div>
+
+<script>
+    let dp = null;
+    let videoGroups = [];
+    let currentBtn = null;
+    let debounceTimer = null;
+
+    // --- 数据解析优化：支持海报 ---
+    function parse() {
+        if (typeof videoData === 'undefined') return;
+        const lines = videoData.trim().split('\n');
+        let movieCount = 0;
+        let current = null;
+
+        lines.forEach(line => {
+            const parts = line.split(',');
+            const name = parts[0];
+            const url = parts[1];
+            const poster = parts[2]; // 假设格式为：片名,url或#genre#,海报地址
+
+            if (!url) return;
+            if (url.trim() === '#genre#') {
+                movieCount++;
+                if (current) videoGroups.push(current);
+                current = { index: movieCount, title: name, poster: poster || '', items: [] };
+            } else if (current) {
+                current.items.push({ name: name.replace(current.title, '').trim() || "正片", url: url.trim() });
+            }
+        });
+        if (current) videoGroups.push(current);
+        document.getElementById('total-movies').innerText = movieCount;
+    }
+
+    // --- 功能1：记忆播放逻辑 ---
+    function saveHistory(url, title) {
+        localStorage.setItem('last_played_url', url);
+        localStorage.setItem('last_played_title', title);
+        let watched = JSON.parse(localStorage.getItem('watched_list') || '[]');
+        if (!watched.includes(url)) {
+            watched.push(url);
+            localStorage.setItem('watched_list', JSON.stringify(watched));
+        }
+    }
+
+    function initPlayer() {
+        dp = new DPlayer({
+            container: document.getElementById('dplayer'),
+            autoplay: false,
+            video: { url: '', type: 'hls' }
+        });
+        dp.on('ended', () => {
+            if (currentBtn) {
+                const next = currentBtn.nextElementSibling;
+                if (next && next.classList.contains('ep-btn')) next.click();
+            }
+        });
+    }
+
+    function playVideo(url, btn, title) {
+        currentBtn = btn;
+        // 更新所有按钮状态
+        document.querySelectorAll('.ep-btn').forEach(b => b.classList.remove('active', 'last-played'));
+        btn.classList.add('active', 'last-played', 'watched');
+        
+        saveHistory(url, title);
+
+        if (!dp) initPlayer();
+        dp.switchVideo({ url: url, type: 'hls' });
+        dp.play();
+        
+        // 平滑滚动到播放器
+        if (!dp.fullScreen.isFullScreen) {
+            document.getElementById('player-box').scrollIntoView({behavior: 'smooth'});
+        }
+    }
+
+    // --- 功能2：搜索防抖 ---
+    document.getElementById('search').addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            render();
+        }, 300); // 300毫秒延迟
+    });
+
+    // --- 渲染页面 ---
+    function render() {
+        const kw = document.getElementById('search').value.toLowerCase();
+        const list = document.getElementById('main-list');
+        list.innerHTML = '';
+
+        const lastUrl = localStorage.getItem('last_played_url');
+        const watchedList = JSON.parse(localStorage.getItem('watched_list') || '[]');
+
+        videoGroups.forEach(g => {
+            if (kw && !g.title.toLowerCase().includes(kw)) return;
+            
+            const card = document.createElement('div');
+            card.className = 'drama-card';
+            
+            // 功能3：如果有海报则显示
+            let posterHtml = g.poster ? `<img src="${g.poster}" class="drama-poster" loading="lazy">` : '';
+            
+            card.innerHTML = `
+                ${posterHtml}
+                <div class="drama-info">
+                    <div class="drama-title"><span class="drama-num">${g.index}</span>${g.title}</div>
+                    <div class="ep-grid" id="grid-${g.index}"></div>
+                </div>
+            `;
+            
+            list.appendChild(card);
+            const grid = card.querySelector('.ep-grid');
+
+            g.items.forEach((item, i) => {
+                const btn = document.createElement('div');
+                btn.className = 'ep-btn';
+                // 恢复记忆状态
+                if (item.url === lastUrl) btn.classList.add('last-played', 'active');
+                if (watchedList.includes(item.url)) btn.classList.add('watched');
+                
+                btn.innerText = (i + 1) + ". " + item.name;
+                btn.onclick = () => playVideo(item.url, btn, g.title);
+                grid.appendChild(btn);
+            });
+        });
+    }
+
+    // 清除历史记录
+    document.getElementById('history-tip').onclick = () => {
+        if(confirm('确定清除所有观看记录吗？')) {
+            localStorage.clear();
+            location.reload();
+        }
+    };
+
+    window.onload = () => {
+        parse();
+        render();
+        initPlayer();
+    };
+</script>
+</body>
+</html>

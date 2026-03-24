@@ -180,6 +180,25 @@
     }
 
     document.getElementById('history-tip').onclick = () => { if(confirm('清除记录？')) { localStorage.clear(); location.reload(); } };
+    // 新增：调用你自己的 Cloudflare 代理接口
+async function callGemini(promptText) {
+    try {
+        const response = await fetch('/api/v1beta/models/gemini-1.5-flash:generateContent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: promptText }] }]
+            })
+        });
+        const data = await response.json();
+        // 返回 AI 生成的文本
+        return data.candidates[0].content.parts[0].text;
+    } catch (error) {
+        console.error("AI 呼叫失败:", error);
+        return "连接赛博中枢失败";
+    }
+}
+
     window.onload = () => { parse(); render(); initPlayer(); };
 </script>
 </body>

@@ -208,6 +208,17 @@ async function callGemini(promptText) {
         return "连接赛博中枢失败";
     }
 }
+async function testAI() {
+    const resDiv = document.getElementById('ai-result');
+    resDiv.innerText = "⏳ 正在同步赛博数据...";
+    try {
+        // 调用你已经写好的 callGemini
+        const text = await callGemini("用5个字描述一下赛博朋克电影");
+        resDiv.innerText = "🤖 AI：" + text;
+    } catch (e) {
+        resDiv.innerText = "❌ 连接失败";
+    }
+}
 
     window.onload = () => { parse(); render(); initPlayer(); };
 </script>
